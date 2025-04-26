@@ -1,8 +1,6 @@
 name: auto build and release
-on: 
-  push:
-    tags:
-      - v*     # Push events for all vx tags
+
+on: workflow_dispatch 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
