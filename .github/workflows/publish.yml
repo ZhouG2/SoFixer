@@ -1,91 +1,95 @@
-name: auto build and release
-
-
-on: 
-  push:
-    tags:
-      - v*     # Push events for all vx tags
+name: Build and Publish
 
 env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
-  BUILD_TYPE: Release
+  BUILD_TYPE: Release  # 定义构建类型
+
+permissions:
+  contents: write  # 全局权限声明
 
 jobs:
   create_release:
+    name: Create Release
     runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: '${{ github.ref }}'
-        release_name: 'Release ${{ github.ref }}'
-        draft: false
-        prerelease: false
     outputs:
-      UPLOAD_URL: ${{ steps.create_release.outputs.upload_url }}
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+
+    steps:
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          release_name: "Release ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
 
   publish:
     needs: [create_release]
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            ext: ''
+            os_tag: linux
+            build_dir_suffix: ""
+          - os: macos-latest
+            ext: ''
+            os_tag: macos
+            build_dir_suffix: ""
+          - os: windows-latest
+            ext: .exe
+            os_tag: windows
+            build_dir_suffix: "/${{ env.BUILD_TYPE }}"  # 动态注入构建类型
+
     runs-on: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
-    - name: build32 environment create
-      run: cmake -E make_directory ${{github.workspace}}/build32
+      # 32位构建
+      - name: Create build32 dir
+        run: cmake -E make_directory ${{github.workspace}}/build32
 
-    - name: build32 Configure CMake
-      shell: bash
-      working-directory: ${{github.workspace}}/build32
-      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DSO_64=OFF -G "CodeBlocks - Unix Makefiles"
+      - name: Configure 32-bit
+        working-directory: ${{github.workspace}}/build32
+        run: cmake .. -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DSO_64=OFF
 
-    - name: build32 build
-      working-directory: ${{github.workspace}}/build32
-      shell: bash
-      run: cmake --build . --config $BUILD_TYPE
+      - name: Build 32-bit
+        working-directory: ${{github.workspace}}/build32
+        run: cmake --build . --config ${{ env.BUILD_TYPE }}
 
-    - name: build64 environment create
-      run: cmake -E make_directory ${{github.workspace}}/build64
+      # 64位构建
+      - name: Create build64 dir
+        run: cmake -E make_directory ${{github.workspace}}/build64
 
-    - name: build64 Configure CMake
-      shell: bash
-      working-directory: ${{github.workspace}}/build64
-      run: cmake $GITHUB_WORKSPACE -DCMAKE_BUILD_TYPE=$BUILD_TYPE -DSO_64=ON -G "CodeBlocks - Unix Makefiles"
+      - name: Configure 64-bit
+        working-directory: ${{github.workspace}}/build64
+        run: cmake .. -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DSO_64=ON
 
-    - name: build64 build
-      working-directory: ${{github.workspace}}/build64
-      shell: bash
-      run: cmake --build . --config $BUILD_TYPE
+      - name: Build 64-bit
+        working-directory: ${{github.workspace}}/build64
+        run: cmake --build . --config ${{ env.BUILD_TYPE }}
 
+      # 上传到 Release
+      - name: Upload 32-bit
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ github.workspace }}/build32${{ matrix.build_dir_suffix }}/SoFixer32${{ matrix.ext }}
+          asset_name: SoFixer-${{ matrix.os_tag }}-32${{ matrix.ext }}
+          asset_content_type: application/octet-stream
 
-    - name: Name Format
-      id: release_name_format
-      if: ${{ runner.os == 'Windows' }}
-      run: echo "::set-output name=format::.exe"
-
-    - name: Upload build 32
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: '${{ needs.create_release.outputs.UPLOAD_URL }}'
-        asset_path: '${{ github.workspace }}/build32/SoFixer32${{ steps.release_name_format.outputs.format }}'
-        asset_name: 'SoFixer-${{ runner.os }}-32${{ steps.release_name_format.outputs.format }}'
-        asset_content_type: application/octet-stream
-
-    - name: Upload build 64
-      uses: actions/upload-release-asset@v1.0.2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: '${{ needs.create_release.outputs.UPLOAD_URL }}'
-        asset_path: '${{ github.workspace }}/build64/SoFixer64${{ steps.release_name_format.outputs.format }}'
-        asset_name: 'SoFixer-${{ runner.os }}-64${{ steps.release_name_format.outputs.format }}'
-        asset_content_type: application/octet-stream
+      - name: Upload 64-bit
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ${{ github.workspace }}/build64${{ matrix.build_dir_suffix }}/SoFixer64${{ matrix.ext }}
+          asset_name: SoFixer-${{ matrix.os_tag }}-64${{ matrix.ext }}
+          asset_content_type: application/octet-stream
